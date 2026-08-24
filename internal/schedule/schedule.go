@@ -58,9 +58,12 @@ func NewScheduler(
 }
 
 // Plan 返回从当前位点续排的窗口。
+//
+// 只要位点已推进到某个键，就只返回该键之后尚未对账的窗口，避免下一周期
+// 重复对账已完成的窗口；位点为空时才从零开始规划全量。
 func (s *Scheduler) Plan(phase model.Phase) []model.Window {
 	pos := s.offsets.Position()
-	if !pos.Completed || pos.Key == "" {
+	if pos.Key == "" {
 		return s.planner.Plan(s.keys, phase)
 	}
 	return s.planner.ResumeWindows(s.keys, phase, pos.Key)
@@ -104,6 +107,11 @@ func (s *Scheduler) Run(ctx context.Context, task *Task) (*model.Result, error) 
 			return total, err
 		}
 		compare.Merge(total, result)
+		if err := s.offsets.Advance(taskCtx, window); err != nil {
+			task.State = StatePartial
+			task.Err = err
+			return total, err
+		}
 		if err := s.notifier.Notify(taskCtx, window, result, s.offsets.Position().Key); err != nil {
 			task.State = StatePartial
 			task.Err = err

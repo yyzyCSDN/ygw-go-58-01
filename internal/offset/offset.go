@@ -64,11 +64,27 @@ func (m *Manager) Position() model.Position {
 }
 
 // Advance 在窗口对账完成后推进位点并持久化。
+//
+// 窗口严格早于已提交位点时视为重复推进，幂等返回，既不回退位点也不写入历史，
+// 以保证并发任务对同一批窗口推进时位点单调不回退。
 func (m *Manager) Advance(ctx context.Context, window model.Window) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if window.Index < m.pos.WindowIndex {
-		return fmt.Errorf("window %d older than position %d", window.Index, m.pos.WindowIndex)
+		return nil
+	}
+	next := model.Position{
+		Phase:       window.Phase,
+		WindowIndex: window.Index,
+		Key:         window.End,
+		Completed:   false,
+	}
+	if err := m.store.Save(ctx, next); err != nil {
+		return fmt.Errorf("persist advanced offset: %w", err)
+	}
+	m.pos = next
+	if m.journal != nil {
+		m.journal.Append(next)
 	}
 	return nil
 }
