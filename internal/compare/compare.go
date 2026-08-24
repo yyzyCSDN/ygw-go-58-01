@@ -25,27 +25,20 @@ type Engine struct {
 	baseline BaselineProvider
 	sink     DiffSink
 	opts     Options
-	base     *target.Baseline
 }
 
 // NewEngine 创建比对引擎。
 func NewEngine(baseline BaselineProvider, sink DiffSink, opts Options) *Engine {
-	engine := &Engine{baseline: baseline, sink: sink, opts: opts}
-	if base, err := baseline.Acquire(context.Background()); err == nil {
-		engine.base = base
-	}
-	return engine
+	return &Engine{baseline: baseline, sink: sink, opts: opts}
 }
 
 // ReconcileWindow 将源记录与最新目标基线比对，并写入差异。
 func (e *Engine) ReconcileWindow(ctx context.Context, window model.Window, records []*model.Record, resume diff.ResumeInfo) (*model.Result, error) {
-	base := e.base
-	if base == nil {
-		var err error
-		base, err = e.baseline.Acquire(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("acquire baseline for %s: %w", window.ID, err)
-		}
+	// 每次对账都向基线提供者索取最新基线：BaselineManager 在目标版本未变时复用缓存，
+	// 目标更新（版本变化）后会自动刷新，从而保证比对始终基于最新目标基线。
+	base, err := e.baseline.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire baseline for %s: %w", window.ID, err)
 	}
 	result := &model.Result{Window: window, StartedAt: time.Now()}
 	seen := make(map[string]struct{}, len(records))

@@ -48,7 +48,9 @@ func NewBaselineManager(store Store) *BaselineManager {
 func (m *BaselineManager) Acquire(ctx context.Context) (*Baseline, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.base != nil {
+	// 目标存储版本未变时复用缓存的基线，避免重复快照；
+	// 版本变化（目标数据更新后）则强制重新加载，保证基线与最新目标一致。
+	if m.base != nil && m.base.version == m.store.Version() {
 		return m.base, nil
 	}
 	snapshot, err := m.store.Snapshot(ctx)
