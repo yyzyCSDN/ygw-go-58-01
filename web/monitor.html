@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ReconcileSvc 对账监控</title>
+<style>
+body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; margin: 24px; background: #f5f7fa; color: #22303c; }
+h1 { font-size: 20px; }
+.card { background: #fff; border: 1px solid #dde3ea; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+button { padding: 8px 14px; border: 0; border-radius: 6px; background: #1f6feb; color: #fff; cursor: pointer; }
+button:disabled { background: #9aa8b8; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; font-size: 13px; }
+th { background: #eef2f7; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.ok { background: #d1f7dc; color: #116329; }
+.warn { background: #ffe9c7; color: #8a5300; }
+</style>
+</head>
+<body>
+<h1>ReconcileSvc 对账监控</h1>
+<div class="card row">
+  <button id="btnHealth">健康检查</button>
+  <button id="btnRun">触发全量对账</button>
+  <button id="btnSwitch">切换增量</button>
+  <button id="btnTargetUpdate">更新目标数据</button>
+  <button id="btnRefresh">刷新</button>
+  <span id="healthBadge" class="badge ok">未检查</span>
+</div>
+<div class="card">
+  <h2>对账结果</h2>
+  <div id="lastResult">-</div>
+</div>
+<div class="card">
+  <h2>差异列表</h2>
+  <table>
+    <thead><tr><th>键</th><th>类型</th><th>源版本</th><th>目标版本</th><th>源数据</th><th>目标数据</th></tr></thead>
+    <tbody id="diffRows"></tbody>
+  </table>
+</div>
+<div class="card row">
+  <div id="offsetBox" style="flex:1"></div>
+  <div id="statsBox" style="flex:1"></div>
+</div>
+<div class="card row">
+  <div id="targetBox" style="flex:1"></div>
+  <div id="readsBox" style="flex:1"></div>
+</div>
+<div class="card">
+  <h2>通知历史</h2>
+  <div id="notifyBox">-</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+async function api(path, options) {
+  const res = await fetch(path, options);
+  return res.json();
+}
+async function refresh() {
+  const health = await api("/api/health");
+  $("healthBadge").textContent = health.status === "ok" ? "服务正常" : "异常";
+  $("healthBadge").className = "badge " + (health.status === "ok" ? "ok" : "warn");
+  const diffs = await api("/api/diffs");
+  const rows = diffs.entries || [];
+  $("diffRows").innerHTML = rows.map(e =>
+    "<tr><td>" + e.Key + "</td><td>" + e.Kind + "</td><td>" + e.SourceVersion +
+    "</td><td>" + e.TargetVersion + "</td><td>" + (e.SourceData || "") +
+    "</td><td>" + (e.TargetData || "") + "</td></tr>").join("");
+  const pos = await api("/api/offsets");
+  $("offsetBox").innerHTML = "<b>位点</b> 阶段=" + pos.phase + " 窗口=" + pos.window_index +
+    " 键=" + pos.key + " 完成=" + pos.completed;
+  const stats = await api("/api/source/stats");
+  $("statsBox").innerHTML = "<b>源连接</b> 活跃=" + stats.active_conns + " 累计=" + stats.total_conns;
+  const target = await api("/api/target/status");
+  $("targetBox").innerHTML = "<b>目标</b> 版本=" + target.version + " 键数=" + target.keys +
+    " 历史=" + (target.history || []).map(h => h.Version + "(" + h.Keys + ")").join(" → ");
+  const reads = await api("/api/source/reads");
+  $("readsBox").innerHTML = "<b>读取</b> " + (reads.reads || []).map(s =>
+    s.WindowID + ": " + s.Kept + "/" + s.Read).join("; ");
+  const notify = await api("/api/notify/history");
+  $("notifyBox").textContent = JSON.stringify(notify.messages || []);
+}
+$("btnHealth").onclick = async () => {
+  const h = await api("/api/health");
+  $("healthBadge").textContent = "状态: " + h.status;
+};
+$("btnRun").onclick = async () => {
+  $("btnRun").disabled = true;
+  const r = await api("/api/reconcile/run", { method: "POST" });
+  $("lastResult").textContent = "任务 " + r.task_id + " 状态=" + r.state +
+    " 总数=" + r.total + " 缺失=" + r.missing + " 不一致=" + r.mismatch + " 多余=" + r.extra;
+  $("btnRun").disabled = false;
+  refresh();
+};
+$("btnSwitch").onclick = async () => {
+  const r = await api("/api/offsets/switch-incremental", { method: "POST" });
+  $("lastResult").textContent = "已切换增量，锚点=" + r.key + " 窗口=" + r.window_index;
+  refresh();
+};
+$("btnTargetUpdate").onclick = async () => {
+  const r = await api("/api/target/update", { method: "POST" });
+  $("lastResult").textContent = "目标已更新 版本=" + r.version + " 键数=" + r.keys;
+  refresh();
+};
+$("btnRefresh").onclick = refresh;
+refresh();
+</script>
+</body>
+</html>
