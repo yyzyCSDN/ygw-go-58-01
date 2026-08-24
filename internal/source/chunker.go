@@ -30,7 +30,12 @@ func (c *Chunker) NextChunk(ctx context.Context) ([]*model.Record, error) {
 	for len(chunk) < c.size {
 		rec, err := c.reader.Next(ctx)
 		if err == io.EOF {
+			// 读取器已耗尽：先冲刷已累积的尾块，下一次调用再返回 EOF，
+			// 确保块边界上的记录不会随 EOF 被丢弃。
 			c.done = true
+			if len(chunk) > 0 {
+				return chunk, nil
+			}
 			return nil, io.EOF
 		}
 		if err != nil {

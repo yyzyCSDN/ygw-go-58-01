@@ -41,6 +41,43 @@ func TestChunkerExactBlocks(t *testing.T) {
 	}
 }
 
+func TestChunkerPartialTailRecord(t *testing.T) {
+	pool := NewConnPool()
+	reader, err := NewMemorySource("s", records(3), pool).Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	chunker := NewChunker(reader, 2, 3)
+
+	var got []*model.Record
+	for {
+		chunk, err := chunker.NextChunk(context.Background())
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		got = append(got, chunk...)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 records across chunks, got %d", len(got))
+	}
+	for i, rec := range got {
+		want := string(rune('a' + i))
+		if rec.Key != want {
+			t.Fatalf("record %d key = %q, want %q", i, rec.Key, want)
+		}
+	}
+	if !chunker.Complete() {
+		t.Fatalf("chunker should be complete: cursor=%d total=%d", chunker.Cursor(), 3)
+	}
+	if chunker.Partial() {
+		t.Fatalf("chunker should not be partial when all records consumed")
+	}
+}
+
 func TestBucketRange(t *testing.T) {
 	for _, key := range []string{"a", "b", "reconcile-key", "zzz"} {
 		if b := Bucket(key, 8); b < 0 || b >= 8 {
