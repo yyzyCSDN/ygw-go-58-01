@@ -43,6 +43,12 @@ func (r *sliceReader) Closed() bool { return r.closed }
 
 // Close 幂等关闭读取器并归还连接。
 func (r *sliceReader) Close() error {
-	r.closed = true
+	if !r.closed {
+		r.closed = true
+		// 归还借用的连接，避免连接句柄泄漏导致源端连接数持续上涨。
+		if r.conn != nil {
+			_ = r.conn.release()
+		}
+	}
 	return nil
 }

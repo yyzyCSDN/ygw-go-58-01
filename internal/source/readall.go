@@ -27,6 +27,9 @@ func readWindowInternal(ctx context.Context, s Source, w model.Window, chunkSize
 	if err != nil {
 		return nil, err
 	}
+	// 读取结束（成功或出错）都必须关闭读取器以归还连接句柄，
+	// 否则源端连接数持续累积，最终触发连接告警并导致读取失败。
+	defer func() { _ = reader.Close() }()
 	chunker := NewChunker(reader, chunkSize, s.Total())
 	var chunks [][]*model.Record
 	stat := ReadStat{WindowID: w.ID}
