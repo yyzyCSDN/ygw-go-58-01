@@ -1,0 +1,63 @@
+package source
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"reconcilesvc/internal/model"
+)
+
+// ReadWindow 分块读取数据源，返回窗口区间内的记录块。
+func ReadWindow(ctx context.Context, s Source, w model.Window, chunkSize int) ([][]*model.Record, error) {
+	chunks, err := readWindowInternal(ctx, s, w, chunkSize, nil)
+	return chunks, err
+}
+
+// ReadWindowTracked 分块读取数据源并记录读取统计。
+func ReadWindowTracked(ctx context.Context, s Source, w model.Window, chunkSize int, tracker *ReadTracker) ([][]*model.Record, error) {
+	return readWindowInternal(ctx, s, w, chunkSize, tracker)
+}
+
+func readWindowInternal(ctx context.Context, s Source, w model.Window, chunkSize int, tracker *ReadTracker) ([][]*model.Record, error) {
+	reader, err := s.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	chunker := NewChunker(reader, chunkSize, s.Total())
+	defer func() {
+		_ = chunker.Close()
+	}()
+	var chunks [][]*model.Record
+	stat := ReadStat{WindowID: w.ID}
+	for {
+		chunk, err := chunker.NextChunk(ctx)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		stat.Read += len(chunk)
+		stat.Chunks++
+		kept := make([]*model.Record, 0, len(chunk))
+		for _, rec := range chunk {
+			if w.Contains(rec.Key) {
+				kept = append(kept, rec)
+			}
+		}
+		stat.Kept += len(kept)
+		if len(kept) > 0 {
+			chunks = append(chunks, kept)
+		}
+	}
+	if err := chunker.Close(); err != nil {
+		return nil, fmt.Errorf("close %s reader: %w", s.Name(), err)
+	}
+	stat.Closed = true
+	if tracker != nil {
+		stat.Partial = chunker.Partial()
+		tracker.Record(stat)
+	}
+	return chunks, nil
+}
