@@ -30,7 +30,7 @@ func (p *Planner) Plan(keys []string, phase model.Phase) []model.Window {
 	total := len(sorted)
 	count := (total + p.size - 1) / p.size
 	windows := make([]model.Window, 0, count)
-	for i := 0; i < count-1; i++ {
+	for i := 0; i < count; i++ {
 		start := i * p.size
 		end := start + p.size
 		if end > total {
