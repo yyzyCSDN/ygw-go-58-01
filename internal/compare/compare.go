@@ -89,7 +89,9 @@ func (e *Engine) ReconcileWindow(ctx context.Context, window model.Window, recor
 		result.Entries = append(result.Entries, entry)
 		result.Extra++
 	}
-	_ = e.sink.WriteResult(ctx, window, result, resume)
+	if err := e.sink.WriteResult(ctx, window, result, resume); err != nil {
+		return nil, fmt.Errorf("write diffs for %s: %w", window.ID, err)
+	}
 	result.FinishedAt = time.Now()
 	return result, nil
 }
